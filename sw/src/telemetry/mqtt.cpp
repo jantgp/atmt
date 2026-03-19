@@ -4,6 +4,7 @@
 Mqtt::Mqtt() : mqttClient(wifiClient)
 {
     mqttClient.setServer(mqtt_server, atoi(mqtt_port));
+    mqttClient.setBufferSize(512);
 }
 
 void Mqtt::init(String chipId)
@@ -41,11 +42,23 @@ void Mqtt::send(const String &topic, const String &message)
 {
     if (!mqttClient.connected())
     {
-        connect();    }
-    
-    mqttClient.publish((Mqtt::chipId + "/" + topic).c_str(), message.c_str());
+        Serial.println("MQTT not connected, reconnecting...");
+        connect();
+        if (!mqttClient.connected())
+        {
+            Serial.println("Reconnect failed, dropping message");
+            return;
+        }
+    }
+
+    String fullTopic = Mqtt::chipId + "/" + topic;
+    bool ok = mqttClient.publish(fullTopic.c_str(), message.c_str());
     mqttClient.loop();
-    Serial.println("Sent message to MQTT => topic: " + topic + " message: " +message);
+
+    if (ok)
+        Serial.println("Sent => " + fullTopic + " (" + String(message.length()) + " bytes)");
+    else
+        Serial.println("publish() failed — message too large or disconnected (payload: " + String(message.length()) + " bytes, buffer: " + String(mqttClient.getBufferSize()) + ")");
 }
 
 void Mqtt::loop()

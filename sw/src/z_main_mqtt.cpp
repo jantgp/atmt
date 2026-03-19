@@ -16,6 +16,9 @@ Mqtt mqtt;
 Usensor ultraSound;
 
 long int age;
+uint32_t g_seq = 0;
+int g_cmdPwm = 0;
+const char* g_cmdSteer = "STRAIGHT";
 
 // -----------------------------
 // Sensor structs
@@ -69,17 +72,48 @@ static void filterSensors(const RawSensors& raw, FilteredSensors& filt) {
 // -----------------------------
 // JSON publish
 // -----------------------------
-static void publishSensorData(const FilteredSensors& filt) {
+static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
   if (ESP.getFreeHeap() < 8000) return;
 
-  static char jsonStr[128];
+  float width        = filt.ul + filt.ur;
+  float centerError  = filt.ur - filt.ul;
+  bool frontBlocked  = !isnan(filt.uf) && filt.uf < 20.0f;
+
+  static char jsonStr[512];
   int written = snprintf(jsonStr, sizeof(jsonStr),
-    "{\"front\":%.1f,\"right\":%.1f,\"left\":%.1f,\"back\":%.1f}",
-    filt.uf, filt.ur, filt.ul, filt.ub
+    "{"
+    "\"truck_id\":\"%s\","
+    "\"seq\":%u,"
+    "\"t_ms\":%lu,"
+    "\"mode\":\"EXPLORE\","
+    "\"ul\":%.1f,"
+    "\"ur\":%.1f,"
+    "\"uf\":%.1f,"
+    "\"ub\":%.1f,"
+    "\"yaw_rate\":0.00,"
+    "\"heading\":0.0,"
+    "\"compass\":0.0,"
+    "\"mag_x\":0.00,"
+    "\"mag_y\":0.00,"
+    "\"mag_z\":0.00,"
+    "\"acc_x\":0.00,"
+    "\"acc_y\":0.00,"
+    "\"acc_z\":0.00,"
+    "\"width\":%.1f,"
+    "\"center_error\":%.1f,"
+    "\"front_blocked\":%s,"
+    "\"cmd_pwm\":%d,"
+    "\"cmd_steer\":\"%s\""
+    "}",
+    chipid.c_str(), (unsigned)g_seq++, (unsigned long)nowMs,
+    filt.ul, filt.ur, filt.uf, filt.ub,
+    width, centerError,
+    frontBlocked ? "true" : "false",
+    g_cmdPwm, g_cmdSteer
   );
 
   if (written < (int)sizeof(jsonStr)) {
-    mqtt.send("distance", jsonStr);
+    mqtt.send("telemetry", jsonStr);
   }
 }
 
@@ -102,10 +136,10 @@ void mqttMessageCallback(char *topic, byte *payload, unsigned int length)
   if (motorIdx >= 0) {
     int colon = message.indexOf(':', motorIdx);
     if (colon >= 0) {
-      int motorVal = message.substring(colon + 1).toInt();
+      g_cmdPwm = message.substring(colon + 1).toInt();
       Serial.print("Setting motor speed to: ");
-      Serial.println(motorVal);
-      motor.driving(motorVal);
+      Serial.println(g_cmdPwm);
+      motor.driving(g_cmdPwm);
     }
   }
 
@@ -114,6 +148,9 @@ void mqttMessageCallback(char *topic, byte *payload, unsigned int length)
     int colon = message.indexOf(':', steerIdx);
     if (colon >= 0) {
       int steerVal = message.substring(colon + 1).toInt();
+      if (steerVal > 0)       g_cmdSteer = "RIGHT";
+      else if (steerVal < 0)  g_cmdSteer = "LEFT";
+      else                    g_cmdSteer = "STRAIGHT";
       Serial.print("Setting steer direction to: ");
       Serial.println(steerVal);
       steer.direction(steerVal);
@@ -198,7 +235,7 @@ void loop()
   static uint32_t lastPublish = 0;
   if ((nowMs - lastPublish) > 500) {
     lastPublish = nowMs;
-    publishSensorData(g_filt);
+    publishSensorData(g_filt, nowMs);
   }
 
   // Safety stop if front or back is too close
