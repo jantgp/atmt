@@ -12,7 +12,8 @@ public:
     void send(const String& topic, const String& message);
     void subscribe(const String& topic);
     void loop();
-    void setCallback(std::function<void(char *, byte *, unsigned int)> callback); // Add this
+    bool connected();
+    void setCallback(std::function<void(char *, byte *, unsigned int)> callback);
 
 private:
     WiFiClient wifiClient;

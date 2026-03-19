@@ -1,5 +1,6 @@
 #include "telemetry/mqtt.h"
 #include <secrets.h>
+#include <esp_wifi.h>
 
 Mqtt::Mqtt() : mqttClient(wifiClient)
 {
@@ -10,14 +11,27 @@ Mqtt::Mqtt() : mqttClient(wifiClient)
 void Mqtt::init(String chipId)
 {
     Mqtt::chipId = chipId;
+    // Disable WiFi modem sleep — prevents cache from being disabled
+    // when the radio wakes up, which causes "Cache disabled but cached
+    // memory region accessed" crashes in ISR context.
+    esp_wifi_set_ps(WIFI_PS_NONE);
 }
+
+bool Mqtt::connected()
+{
+    return mqttClient.connected();
+}
+
 void Mqtt::subscribe(const String &topic)
 {
     if (!mqttClient.connected())
     {
         connect();
     }
-    mqttClient.subscribe((Mqtt::chipId + "/" + topic).c_str());
+    // Use a fixed buffer instead of String concatenation
+    char fullTopic[128];
+    snprintf(fullTopic, sizeof(fullTopic), "%s/%s", chipId.c_str(), topic.c_str());
+    mqttClient.subscribe(fullTopic);
 }
 
 void Mqtt::connect()
@@ -51,21 +65,24 @@ void Mqtt::send(const String &topic, const String &message)
         }
     }
 
-    String fullTopic = Mqtt::chipId + "/" + topic;
-    bool ok = mqttClient.publish(fullTopic.c_str(), message.c_str());
+    // Use a fixed stack buffer to avoid heap allocation during publish
+    char fullTopic[128];
+    snprintf(fullTopic, sizeof(fullTopic), "%s/%s", chipId.c_str(), topic.c_str());
+
+    bool ok = mqttClient.publish(fullTopic, message.c_str());
     mqttClient.loop();
 
     if (ok)
-        Serial.println("Sent => " + fullTopic + " (" + String(message.length()) + " bytes)");
+        Serial.printf("Sent => %s (%d bytes)\n", fullTopic, message.length());
     else
-        Serial.println("publish() failed — message too large or disconnected (payload: " + String(message.length()) + " bytes, buffer: " + String(mqttClient.getBufferSize()) + ")");
+        Serial.printf("publish() failed — payload: %d bytes, buffer: %d\n",
+                      message.length(), mqttClient.getBufferSize());
 }
 
 void Mqtt::loop()
 {
     mqttClient.loop();
 }
-
 
 void Mqtt::setCallback(std::function<void(char *, byte *, unsigned int)> callback)
 {

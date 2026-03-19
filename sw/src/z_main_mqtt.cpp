@@ -3,6 +3,7 @@
 #include <PubSubClient.h>
 #include <variables/setget.h>
 #include <sensors/usensor.h>
+#include <sensors/accsensor.h>
 #include <actuators/motor.h>
 #include <actuators/steer.h>
 #include <telemetry/mqtt.h>
@@ -14,6 +15,7 @@ Steer steer;
 Motor motor;
 Mqtt mqtt;
 Usensor ultraSound;
+ACCsensor accelSensor;
 
 long int age;
 uint32_t g_seq = 0;
@@ -28,6 +30,12 @@ struct RawSensors {
   float ur = NAN;
   float uf = NAN;
   float ub = NAN;
+  float gyX = NAN;
+  float gyY = NAN;
+  float gyZ = NAN;
+  float accX = NAN;
+  float accY = NAN;
+  float accZ = NAN;
 };
 
 struct FilteredSensors {
@@ -35,12 +43,19 @@ struct FilteredSensors {
   float ur = NAN;
   float uf = NAN;
   float ub = NAN;
+  float gyX = NAN;
+  float gyY = NAN;
+  float gyZ = NAN;
+  float accX = NAN;
+  float accY = NAN;
+  float accZ = NAN;
 };
 
 RawSensors g_raw;
 FilteredSensors g_filt;
 
-static const float US_ALPHA = 0.35f;
+static const float US_ALPHA  = 0.35f;
+static const float IMU_ALPHA = 0.25f;
 
 // -----------------------------
 // EMA helper
@@ -58,15 +73,30 @@ static float readUltrasonicLeftCm()  { return (float)globalVar_get(rawDistLeft, 
 static float readUltrasonicRightCm() { return (float)globalVar_get(rawDistRight, &age); }
 static float readUltrasonicFrontCm() { return (float)globalVar_get(rawDistFront, &age); }
 static float readUltrasonicBackCm()  { return (float)globalVar_get(rawDistBack,  &age); }
+// rawGyX/Y are stored as raw/13 in accsensor.cpp; convert to deg/s (sensitivity 131 LSB/deg/s)
+static float readGyroX()  { return globalVar_get(rawGyX, &age) / 10.08f; }
+static float readGyroY()  { return globalVar_get(rawGyY, &age) / 10.08f; }
+// rawGyZ is already stored as deg/s in accsensor.cpp (divided by 131 there)
+static float readGyroZ()  { return (float)globalVar_get(rawGyZ, &age); }
+// Convert raw ADC counts to g (±2g range => 16384 LSB/g)
+static float readAccX()   { return globalVar_get(rawAccX, &age) / 16384.0f; }
+static float readAccY()   { return globalVar_get(rawAccY, &age) / 16384.0f; }
+static float readAccZ()   { return globalVar_get(rawAccZ, &age) / 16384.0f; }
 
 // -----------------------------
 // Sensor filter
 // -----------------------------
 static void filterSensors(const RawSensors& raw, FilteredSensors& filt) {
-  filt.ul = ema(filt.ul, raw.ul, US_ALPHA);
-  filt.ur = ema(filt.ur, raw.ur, US_ALPHA);
-  filt.uf = ema(filt.uf, raw.uf, US_ALPHA);
-  filt.ub = ema(filt.ub, raw.ub, US_ALPHA);
+  filt.ul   = ema(filt.ul,   raw.ul,   US_ALPHA);
+  filt.ur   = ema(filt.ur,   raw.ur,   US_ALPHA);
+  filt.uf   = ema(filt.uf,   raw.uf,   US_ALPHA);
+  filt.ub   = ema(filt.ub,   raw.ub,   US_ALPHA);
+  filt.gyX  = ema(filt.gyX,  raw.gyX,  IMU_ALPHA);
+  filt.gyY  = ema(filt.gyY,  raw.gyY,  IMU_ALPHA);
+  filt.gyZ  = ema(filt.gyZ,  raw.gyZ,  IMU_ALPHA);
+  filt.accX = ema(filt.accX, raw.accX, IMU_ALPHA);
+  filt.accY = ema(filt.accY, raw.accY, IMU_ALPHA);
+  filt.accZ = ema(filt.accZ, raw.accZ, IMU_ALPHA);
 }
 
 // -----------------------------
@@ -90,15 +120,15 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     "\"ur\":%.1f,"
     "\"uf\":%.1f,"
     "\"ub\":%.1f,"
-    "\"yaw_rate\":0.00,"
+    "\"yaw_rate\":%.2f,"
     "\"heading\":0.0,"
     "\"compass\":0.0,"
     "\"mag_x\":0.00,"
     "\"mag_y\":0.00,"
     "\"mag_z\":0.00,"
-    "\"acc_x\":0.00,"
-    "\"acc_y\":0.00,"
-    "\"acc_z\":0.00,"
+    "\"acc_x\":%.2f,"
+    "\"acc_y\":%.2f,"
+    "\"acc_z\":%.2f,"
     "\"width\":%.1f,"
     "\"center_error\":%.1f,"
     "\"front_blocked\":%s,"
@@ -107,6 +137,8 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     "}",
     chipid.c_str(), (unsigned)g_seq++, (unsigned long)nowMs,
     filt.ul, filt.ur, filt.uf, filt.ub,
+    filt.gyZ,
+    filt.accX, filt.accY, filt.accZ,
     width, centerError,
     frontBlocked ? "true" : "false",
     g_cmdPwm, g_cmdSteer
@@ -181,6 +213,9 @@ void setup()
   vTaskDelay(pdMS_TO_TICKS(500));
   Serial.println("******************************************************");
 
+  accelSensor.Begin();
+  delay(500);
+
   ultraSound.open(TRIGGER_PIN1, ECHO_PIN1, rawDistFront);
   delay(100);
   ultraSound.open(TRIGGER_PIN2, ECHO_PIN2, rawDistRight);
@@ -223,10 +258,16 @@ void loop()
     lastSensorRead = nowMs;
 
     if (ESP.getFreeHeap() > 9000) {
-      g_raw.ul = readUltrasonicLeftCm();
-      g_raw.ur = readUltrasonicRightCm();
-      g_raw.uf = readUltrasonicFrontCm();
-      g_raw.ub = readUltrasonicBackCm();
+      g_raw.ul   = readUltrasonicLeftCm();
+      g_raw.ur   = readUltrasonicRightCm();
+      g_raw.uf   = readUltrasonicFrontCm();
+      g_raw.ub   = readUltrasonicBackCm();
+      g_raw.gyX  = readGyroX();
+      g_raw.gyY  = readGyroY();
+      g_raw.gyZ  = readGyroZ();
+      g_raw.accX = readAccX();
+      g_raw.accY = readAccY();
+      g_raw.accZ = readAccZ();
       filterSensors(g_raw, g_filt);
     }
   }
