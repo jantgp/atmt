@@ -4,6 +4,7 @@
 #include <variables/setget.h>
 #include <sensors/usensor.h>
 #include <sensors/accsensor.h>
+#include <sensors/compass.h>
 #include <actuators/motor.h>
 #include <actuators/steer.h>
 #include <telemetry/mqtt.h>
@@ -16,6 +17,7 @@ Motor motor;
 Mqtt mqtt;
 Usensor ultraSound;
 ACCsensor accelSensor;
+Compass compass;
 
 long int age;
 uint32_t g_seq = 0;
@@ -36,6 +38,10 @@ struct RawSensors {
   float accX = NAN;
   float accY = NAN;
   float accZ = NAN;
+  float magX = NAN;
+  float magY = NAN;
+  float magZ = NAN;
+  float heading = NAN;
 };
 
 struct FilteredSensors {
@@ -49,6 +55,10 @@ struct FilteredSensors {
   float accX = NAN;
   float accY = NAN;
   float accZ = NAN;
+  float magX = NAN;
+  float magY = NAN;
+  float magZ = NAN;
+  float heading = NAN;
 };
 
 RawSensors g_raw;
@@ -82,6 +92,13 @@ static float readGyroZ()  { return (float)globalVar_get(rawGyZ, &age); }
 static float readAccX()   { return globalVar_get(rawAccX, &age) / 16384.0f; }
 static float readAccY()   { return globalVar_get(rawAccY, &age) / 16384.0f; }
 static float readAccZ()   { return globalVar_get(rawAccZ, &age) / 16384.0f; }
+static float readMagX()   { return (float)globalVar_get(rawMagX, &age); }
+static float readMagY()   { return (float)globalVar_get(rawMagY, &age); }
+static float readMagZ()   { return (float)globalVar_get(rawMagZ, &age); }
+static float readHeading() {
+  long h = globalVar_get(calcHeading, &age);
+  return (h == -1) ? NAN : h / 10.0f;  // stored as 1/10 degrees
+}
 
 // -----------------------------
 // Sensor filter
@@ -94,9 +111,13 @@ static void filterSensors(const RawSensors& raw, FilteredSensors& filt) {
   filt.gyX  = ema(filt.gyX,  raw.gyX,  IMU_ALPHA);
   filt.gyY  = ema(filt.gyY,  raw.gyY,  IMU_ALPHA);
   filt.gyZ  = ema(filt.gyZ,  raw.gyZ,  IMU_ALPHA);
-  filt.accX = ema(filt.accX, raw.accX, IMU_ALPHA);
-  filt.accY = ema(filt.accY, raw.accY, IMU_ALPHA);
-  filt.accZ = ema(filt.accZ, raw.accZ, IMU_ALPHA);
+  filt.accX    = ema(filt.accX,    raw.accX,    IMU_ALPHA);
+  filt.accY    = ema(filt.accY,    raw.accY,    IMU_ALPHA);
+  filt.accZ    = ema(filt.accZ,    raw.accZ,    IMU_ALPHA);
+  filt.magX    = ema(filt.magX,    raw.magX,    IMU_ALPHA);
+  filt.magY    = ema(filt.magY,    raw.magY,    IMU_ALPHA);
+  filt.magZ    = ema(filt.magZ,    raw.magZ,    IMU_ALPHA);
+  filt.heading = ema(filt.heading, raw.heading, IMU_ALPHA);
 }
 
 // -----------------------------
@@ -121,11 +142,11 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     "\"uf\":%.1f,"
     "\"ub\":%.1f,"
     "\"yaw_rate\":%.2f,"
-    "\"heading\":0.0,"
-    "\"compass\":0.0,"
-    "\"mag_x\":0.00,"
-    "\"mag_y\":0.00,"
-    "\"mag_z\":0.00,"
+    "\"heading\":%.1f,"
+    "\"compass\":%.1f,"
+    "\"mag_x\":%.2f,"
+    "\"mag_y\":%.2f,"
+    "\"mag_z\":%.2f,"
     "\"acc_x\":%.2f,"
     "\"acc_y\":%.2f,"
     "\"acc_z\":%.2f,"
@@ -138,6 +159,8 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     chipid.c_str(), (unsigned)g_seq++, (unsigned long)nowMs,
     filt.ul, filt.ur, filt.uf, filt.ub,
     filt.gyZ,
+    filt.heading, filt.heading,
+    filt.magX, filt.magY, filt.magZ,
     filt.accX, filt.accY, filt.accZ,
     width, centerError,
     frontBlocked ? "true" : "false",
@@ -215,6 +238,8 @@ void setup()
 
   accelSensor.Begin();
   delay(500);
+  compass.Begin();
+  delay(500);
 
   ultraSound.open(TRIGGER_PIN1, ECHO_PIN1, rawDistFront);
   delay(100);
@@ -265,9 +290,13 @@ void loop()
       g_raw.gyX  = readGyroX();
       g_raw.gyY  = readGyroY();
       g_raw.gyZ  = readGyroZ();
-      g_raw.accX = readAccX();
-      g_raw.accY = readAccY();
-      g_raw.accZ = readAccZ();
+      g_raw.accX    = readAccX();
+      g_raw.accY    = readAccY();
+      g_raw.accZ    = readAccZ();
+      g_raw.magX    = readMagX();
+      g_raw.magY    = readMagY();
+      g_raw.magZ    = readMagZ();
+      g_raw.heading = readHeading();
       filterSensors(g_raw, g_filt);
     }
   }
