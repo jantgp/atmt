@@ -1,13 +1,13 @@
-#include <WiFi.h>
 #include <Arduino.h>
-#include <telemetry/mqtt.h>
-#include <secrets.h>
+#include <WiFi.h>
 #include <PubSubClient.h>
-#include <ArduinoJson.h>
-#include <actuators/motor.h>
-#include <actuators/steer.h>
 #include <variables/setget.h>
 #include <sensors/usensor.h>
+#include <actuators/motor.h>
+#include <actuators/steer.h>
+#include <telemetry/mqtt.h>
+#include <secrets.h>
+#include <atmio.h>
 
 String chipid;
 Steer steer;
@@ -15,156 +15,197 @@ Motor motor;
 Mqtt mqtt;
 Usensor ultraSound;
 
-// Ultrasound number and pins
-#define NUM_SENSORS 4
-#define TRIGGER_PIN 16
-#define ECHO_PIN 34
-#define TRIGGER_PIN2 17
-#define ECHO_PIN2 35
-#define TRIGGER_PIN3 26
-#define ECHO_PIN3 25
-#define TRIGGER_PIN4 19
-#define ECHO_PIN4 18
-
 long int age;
 
-// Create vecors for the ultrasouns sensor pins
-int triggerPins[NUM_SENSORS] = {TRIGGER_PIN, TRIGGER_PIN2, TRIGGER_PIN3, TRIGGER_PIN4};
-int echoPins[NUM_SENSORS] = {ECHO_PIN, ECHO_PIN2, ECHO_PIN3, ECHO_PIN4};
+// -----------------------------
+// Sensor structs
+// -----------------------------
+struct RawSensors {
+  float ul = NAN;
+  float ur = NAN;
+  float uf = NAN;
+  float ub = NAN;
+};
 
-// Define the callback function
-void mqttMessageCallback(char *topic, byte *payload, unsigned int length)
-{
-	Serial.print("Message arrived on topic: ");
-	Serial.println(topic);
+struct FilteredSensors {
+  float ul = NAN;
+  float ur = NAN;
+  float uf = NAN;
+  float ub = NAN;
+};
 
-	// Convert payload to a string
-	String message = "";
-	for (unsigned int i = 0; i < length; i++)
-	{
-		message += (char)payload[i];
-	}
+RawSensors g_raw;
+FilteredSensors g_filt;
 
-	Serial.print("Message: ");
-	Serial.println(message);
-	 // Parse the message as JSON
-	 StaticJsonDocument<200> jsonDoc;
-	 DeserializationError error = deserializeJson(jsonDoc, message);
- 
-	 if (error)
-	 {
-		 Serial.print("Failed to parse JSON: ");
-		 Serial.println(error.c_str());
-		 return;
-	 }
+static const float US_ALPHA = 0.35f;
 
-	 // Access JSON values
-	 if (jsonDoc.containsKey("motor"))
-	 {
-		 int motorSpeed = jsonDoc["motor"];
-		 Serial.print("Setting motor speed to: ");
-		 Serial.println(motorSpeed);
-		 motor.driving(motorSpeed); // Assuming `motor.driving(int)` is a valid method
-	 }
-
-	 if (jsonDoc.containsKey("direction"))
-	 {
-		 int direction = jsonDoc["direction"];
-		 Serial.print("Setting steer direction to: ");
-		 Serial.println(steerDirection);
- 
-		 steer.direction(direction);
-	 }
-	
+// -----------------------------
+// EMA helper
+// -----------------------------
+static float ema(float prev, float current, float alpha) {
+  if (isnan(prev))    return current;
+  if (isnan(current)) return prev;
+  return alpha * current + (1.0f - alpha) * prev;
 }
 
+// -----------------------------
+// Sensor read helpers
+// -----------------------------
+static float readUltrasonicLeftCm()  { return (float)globalVar_get(rawDistLeft,  &age); }
+static float readUltrasonicRightCm() { return (float)globalVar_get(rawDistRight, &age); }
+static float readUltrasonicFrontCm() { return (float)globalVar_get(rawDistFront, &age); }
+static float readUltrasonicBackCm()  { return (float)globalVar_get(rawDistBack,  &age); }
 
+// -----------------------------
+// Sensor filter
+// -----------------------------
+static void filterSensors(const RawSensors& raw, FilteredSensors& filt) {
+  filt.ul = ema(filt.ul, raw.ul, US_ALPHA);
+  filt.ur = ema(filt.ur, raw.ur, US_ALPHA);
+  filt.uf = ema(filt.uf, raw.uf, US_ALPHA);
+  filt.ub = ema(filt.ub, raw.ub, US_ALPHA);
+}
+
+// -----------------------------
+// JSON publish
+// -----------------------------
+static void publishSensorData(const FilteredSensors& filt) {
+  if (ESP.getFreeHeap() < 8000) return;
+
+  static char jsonStr[128];
+  int written = snprintf(jsonStr, sizeof(jsonStr),
+    "{\"front\":%.1f,\"right\":%.1f,\"left\":%.1f,\"back\":%.1f}",
+    filt.uf, filt.ur, filt.ul, filt.ub
+  );
+
+  if (written < (int)sizeof(jsonStr)) {
+    mqtt.send("distance", jsonStr);
+  }
+}
+
+// -----------------------------
+// MQTT callback (motor / steer control)
+// -----------------------------
+void mqttMessageCallback(char *topic, byte *payload, unsigned int length)
+{
+  Serial.print("Message arrived on topic: ");
+  Serial.println(topic);
+
+  String message = "";
+  for (unsigned int i = 0; i < length; i++) {
+    message += (char)payload[i];
+  }
+  Serial.print("Message: ");
+  Serial.println(message);
+
+  int motorIdx = message.indexOf("\"motor\"");
+  if (motorIdx >= 0) {
+    int colon = message.indexOf(':', motorIdx);
+    if (colon >= 0) {
+      int motorVal = message.substring(colon + 1).toInt();
+      Serial.print("Setting motor speed to: ");
+      Serial.println(motorVal);
+      motor.driving(motorVal);
+    }
+  }
+
+  int steerIdx = message.indexOf("\"direction\"");
+  if (steerIdx >= 0) {
+    int colon = message.indexOf(':', steerIdx);
+    if (colon >= 0) {
+      int steerVal = message.substring(colon + 1).toInt();
+      Serial.print("Setting steer direction to: ");
+      Serial.println(steerVal);
+      steer.direction(steerVal);
+    }
+  }
+}
+
+// -----------------------------
+// Setup / loop
+// -----------------------------
 void setup()
 {
-	// Initialize serial communication for debugging
-	Serial.begin(57600);
-	uint64_t chipIdHex = ESP.getEfuseMac();
-	chipid = String((uint32_t)(chipIdHex >> 32), HEX) + String((uint32_t)chipIdHex, HEX);
+  Serial.begin(57600);
+  uint64_t chipIdHex = ESP.getEfuseMac();
+  chipid = String((uint32_t)(chipIdHex >> 32), HEX) + String((uint32_t)chipIdHex, HEX);
 
+  Serial.println("******************************************************");
+  Serial.print("ESP32 Chip ID: ");
+  Serial.println(chipid);
+  Serial.println("******************************************************");
 
-	globalVar_init();
-    steer.Begin();
-	vTaskDelay(pdMS_TO_TICKS(500));
+  globalVar_init();
+    Serial.println("******************************************************");
 
-	Serial.println("Steer initiated)");
-	vTaskDelay(pdMS_TO_TICKS(500));
+  steer.Begin();
+  Serial.println("******************************************************");
 
-	Serial.println();
-	Serial.println("******************************************************");
-	Serial.print("ESP32 Unique Chip ID (MAC): ");
-	Serial.println(chipid);
-	Serial.println("******************************************************");
+  vTaskDelay(pdMS_TO_TICKS(500));
+  Serial.println("******************************************************");
 
-	ultraSound.open(TRIGGER_PIN, ECHO_PIN, rawDistFront);
-		Serial.println("******************************************************");
-	ultraSound.open(TRIGGER_PIN2, ECHO_PIN2, rawDistRight);
-		Serial.println("******************************************************");
-	ultraSound.open(TRIGGER_PIN3, ECHO_PIN3, rawDistLeft);
-		Serial.println("******************************************************");
-	ultraSound.open(TRIGGER_PIN4, ECHO_PIN4, rawDistBack);
-		Serial.println("******************************************************");
+  ultraSound.open(TRIGGER_PIN1, ECHO_PIN1, rawDistFront);
+  delay(100);
+  ultraSound.open(TRIGGER_PIN2, ECHO_PIN2, rawDistRight);
+  delay(100);
+  ultraSound.open(TRIGGER_PIN3, ECHO_PIN3, rawDistLeft);
+  delay(100);
+  ultraSound.open(TRIGGER_PIN4, ECHO_PIN4, rawDistBack);
+  delay(100);
+  Serial.println("******************************************************");
+  delay(2000);
+  WiFi.begin(ssid, password);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
+  }
+  Serial.println("Connected to WiFi");
 
-	// Connect to WiFi
-	WiFi.begin(ssid, password);
-	while (WiFi.status() != WL_CONNECTED)
-	{
-		delay(1000);
-		Serial.println("Connecting to WiFi...");
-	}
-	Serial.println("Connected to WiFi");
-	// Here we should add a debug print of all sensor values before we start running to make sure everything is working.
+  mqtt.init(chipid);
+  mqtt.setCallback(mqttMessageCallback);
+  mqtt.send("test", "Hello World");
+  mqtt.subscribe("control");
 
-	mqtt.init(chipid);
-
-	// Set the callback function
-	mqtt.setCallback(mqttMessageCallback);
-
-	mqtt.send("test", "Hello World");
-
-	// Subscribe to a topic
-	mqtt.subscribe("control");
-
-	delay(1000);
-	//
+  delay(1000);
 }
 
 void loop()
 {
+  const uint32_t nowMs = millis();
 
-	mqtt.loop();
+  // MQTT loop at 10 Hz
+  static uint32_t lastMqttLoop = 0;
+  if ((nowMs - lastMqttLoop) > 100) {
+    lastMqttLoop = nowMs;
+    mqtt.loop();
+  }
 
+  // Read and filter sensors at 20 Hz
+  static uint32_t lastSensorRead = 0;
+  if ((nowMs - lastSensorRead) > 50) {
+    lastSensorRead = nowMs;
 
+    if (ESP.getFreeHeap() > 9000) {
+      g_raw.ul = readUltrasonicLeftCm();
+      g_raw.ur = readUltrasonicRightCm();
+      g_raw.uf = readUltrasonicFrontCm();
+      g_raw.ub = readUltrasonicBackCm();
+      filterSensors(g_raw, g_filt);
+    }
+  }
 
-	    // Create a JSON object
-    StaticJsonDocument<200> jsonDoc;
+  // Publish filtered sensor data to MQTT at 2 Hz
+  static uint32_t lastPublish = 0;
+  if ((nowMs - lastPublish) > 500) {
+    lastPublish = nowMs;
+    publishSensorData(g_filt);
+  }
 
-    // Add sensor values to the JSON object
-    jsonDoc["front"] = globalVar_get(rawDistFront, &age);
-    jsonDoc["left"] = globalVar_get(rawDistLeft, &age);
-    jsonDoc["right"] = globalVar_get(rawDistRight, &age);
-    jsonDoc["back"] = globalVar_get(rawDistBack, &age);
-
-    // Serialize the JSON object to a string
-    String jsonString;
-    serializeJson(jsonDoc, jsonString);
-
-    // Send the JSON string via MQTT
-    mqtt.send("distance", jsonString);
-	// Delay for 500ms
-   // vTaskDelay(pdMS_TO_TICKS(500));
-
-	if(globalVar_get(rawDistFront, &age)< 20){
-		motor.driving(0);
-	}
-
-	if(globalVar_get(rawDistBack, &age)< 20){
-		motor.driving(0);
-	}
-
-
+  // Safety stop if front or back is too close
+  if (!isnan(g_filt.uf) && g_filt.uf < 20.0f) {
+    motor.driving(0);
+  }
+  if (!isnan(g_filt.ub) && g_filt.ub < 20.0f) {
+    motor.driving(0);
+  }
 }
