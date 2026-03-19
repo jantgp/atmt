@@ -3,8 +3,8 @@
 motorType_t motorType;
 steerType_t steerType;
 boolean servoReverse = false;
-int steer_servo_min = 51;
-int steer_servo_max = 102;
+int steer_servo_min = 55;
+int steer_servo_max = 100;
 int steer_servo_adjust = 0;
 
 Config::Config(void) {};
@@ -60,7 +60,7 @@ void Config::Begin(void)
 
     case 0x38504720F540: // JCA01
         NAME = "JCA01";
-        Serial.println("Configures PÄR02");
+        Serial.println("Configures JCA01");
         motorType = DIFFERENTIAL;
         steerType = SERVO;
         steer_servo_min = 60;

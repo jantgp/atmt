@@ -4,7 +4,7 @@
 HOST=192.168.2.2
 VEHICLE_ID_JCA01="38504720f540"
 VEHICLE_ID_PAR01="b4328a0a8ab4"
-VEHICLE_ID=${VEHICLE_ID_PAR01}
+VEHICLE_ID=${VEHICLE_ID_JCA01}
 
 # some nice lines for the console output
 echo "==============================================================================================="

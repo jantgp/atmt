@@ -86,17 +86,7 @@ void setup()
 	uint64_t chipIdHex = ESP.getEfuseMac();
 	chipid = String((uint32_t)(chipIdHex >> 32), HEX) + String((uint32_t)chipIdHex, HEX);
 
-	// Connect to WiFi
-	WiFi.begin(ssid, password);
-	while (WiFi.status() != WL_CONNECTED)
-	{
-		delay(1000);
-		Serial.println("Connecting to WiFi...");
-	}
-	Serial.println("Connected to WiFi");
-	// Here we should add a debug print of all sensor values before we start running to make sure everything is working.
 
-	
 	globalVar_init();
     steer.Begin();
 	vTaskDelay(pdMS_TO_TICKS(500));
@@ -111,11 +101,23 @@ void setup()
 	Serial.println("******************************************************");
 
 	ultraSound.open(TRIGGER_PIN, ECHO_PIN, rawDistFront);
+		Serial.println("******************************************************");
 	ultraSound.open(TRIGGER_PIN2, ECHO_PIN2, rawDistRight);
+		Serial.println("******************************************************");
 	ultraSound.open(TRIGGER_PIN3, ECHO_PIN3, rawDistLeft);
+		Serial.println("******************************************************");
 	ultraSound.open(TRIGGER_PIN4, ECHO_PIN4, rawDistBack);
+		Serial.println("******************************************************");
 
-	
+	// Connect to WiFi
+	WiFi.begin(ssid, password);
+	while (WiFi.status() != WL_CONNECTED)
+	{
+		delay(1000);
+		Serial.println("Connecting to WiFi...");
+	}
+	Serial.println("Connected to WiFi");
+	// Here we should add a debug print of all sensor values before we start running to make sure everything is working.
 
 	mqtt.init(chipid);
 
