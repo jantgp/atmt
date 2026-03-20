@@ -37,32 +37,28 @@ volatile int current_sensor = 0;
 volatile bool pulse_active = false; // indicate a pulse has been sent and no echo yet received.
 volatile long startTime;  //need to implement proper wrap around for this using nsigned and signed
 
-void echoInterrupt()
-{
+// ISR-safe distance buffer: written by echoInterrupt (ISR), read by TriggerTask (task context).
+// globalVar_set() uses a FreeRTOS mutex and must NOT be called from an ISR.
+static volatile long  isr_dist[MAX_SENSORS];
+static volatile bool  isr_dist_ready[MAX_SENSORS];
 
+void IRAM_ATTR echoInterrupt()
+{
     if (digitalRead(sensor[current_sensor].ECHO) == HIGH)
     {
-        /*Serial.print(" S");
-        Serial.print(current_sensor);
-        Serial.println("u ");*/
         pulse_active = true;
-
-        // The echo pin went from LOW to HIGH: start timing
         startTime = micros();
     }
     else
     {
-        /*Serial.print(" S");
-       Serial.print(current_sensor);
-       Serial.println("d ");*/
-        // long tmp = micros() - startTime ;
-        //  The echo pin went from HIGH to LOW: stop timing and calculate distance
         pulse_active = false;
-        long travelTime = micros() - startTime; // need to make this wrap around safe by the int - uint trick
+        long travelTime = micros() - startTime;
         int distance = travelTime / 29 / 2;     // in cm
         if (distance > 199)
             distance = 199;
-        globalVar_set(sensor[current_sensor].NAME, distance);
+        // Store in volatile buffer; TriggerTask will commit to globalVar.
+        isr_dist[current_sensor] = distance;
+        isr_dist_ready[current_sensor] = true;
     }
 }
 
@@ -79,9 +75,19 @@ static void TriggerTask(void *params)
         // Serial.print(">");
         if (num_sensors > 0)
         {
+            // Flush ISR-captured distances to globalVar (safe: task context, mutex allowed).
+            for (int i = 0; i < num_sensors; i++)
+            {
+                if (isr_dist_ready[i])
+                {
+                    isr_dist_ready[i] = false;
+                    globalVar_set(sensor[i].NAME, isr_dist[i]);
+                }
+            }
+
             if (pulse_active)
             {
-                // vTaskDelay(pdMS_TO_TICKS(50)); // we have not yet reveived an echo from the previous trigger,
+                // we have not yet received an echo from the previous trigger,
                 // set distance to 199 indicating unknown value
                 globalVar_set(sensor[current_sensor].NAME, 199);
             }

@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <PubSubClient.h>
 #include <variables/setget.h>
 #include <sensors/usensor.h>
@@ -142,6 +143,8 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     "\"uf\":%.1f,"
     "\"ub\":%.1f,"
     "\"yaw_rate\":%.2f,"
+    "\"gy_x\":%.2f,"
+    "\"gy_y\":%.2f,"
     "\"heading\":%.1f,"
     "\"compass\":%.1f,"
     "\"mag_x\":%.2f,"
@@ -159,6 +162,7 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     chipid.c_str(), (unsigned)g_seq++, (unsigned long)nowMs,
     filt.ul, filt.ur, filt.uf, filt.ub,
     filt.gyZ,
+    filt.gyX, filt.gyY,
     filt.heading, filt.heading,
     filt.magX, filt.magY, filt.magZ,
     filt.accX, filt.accY, filt.accZ,
@@ -251,9 +255,15 @@ void setup()
   delay(100);
   Serial.println("******************************************************");
   delay(2000);
+  // Disable WiFi modem sleep before connecting — prevents the WiFi stack from
+  // temporarily disabling the flash cache (which crashes any ISR executing Flash code)
+  WiFi.persistent(false);              // MUST be before WiFi.mode() — prevents credential NVS writes
+  esp_wifi_set_storage(WIFI_STORAGE_RAM); // ALL WiFi state in RAM — no background NVS flash writes ever
+  WiFi.mode(WIFI_STA);
+  esp_wifi_set_ps(WIFI_PS_NONE);
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
+    delay(500);
     Serial.println("Connecting to WiFi...");
   }
   Serial.println("Connected to WiFi");
@@ -263,7 +273,7 @@ void setup()
   mqtt.send("test", "Hello World");
   mqtt.subscribe("control");
 
-  delay(1000);
+  delay(500);
 }
 
 void loop()

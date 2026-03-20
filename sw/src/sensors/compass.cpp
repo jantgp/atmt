@@ -149,7 +149,6 @@ MagCalibration getCalibrationData() {
 
 // Save calibration data to EEPROM
 void saveCalibrationToEEPROM() {
-    EEPROM.begin(512);
     uint32_t magic = CALIBRATION_MAGIC;
     EEPROM.put(EEPROM_CAL_MAGIC_ADDR, magic);
     EEPROM.put(EEPROM_CAL_DATA_ADDR, g_calibration);
@@ -157,9 +156,8 @@ void saveCalibrationToEEPROM() {
     Serial.println("[MAG] ✅ Calibration saved to EEPROM");
 }
 
-// Load calibration data from EEPROM  
+// Load calibration data from EEPROM
 bool loadCalibrationFromEEPROM() {
-    EEPROM.begin(512);
     uint32_t magic;
     EEPROM.get(EEPROM_CAL_MAGIC_ADDR, magic);
     
@@ -254,8 +252,9 @@ void updateBackgroundCalibration(float magX, float magY, float magZ) {
                 hasStoredCalibration = true; // Now we have calibration
             }
             
-            // Save improved calibration
-            saveCalibrationToEEPROM();
+            // NOTE: saveCalibrationToEEPROM() is intentionally NOT called here.
+            // EEPROM.commit() disables the flash cache, which crashes any I2C ISR
+            // executing from Flash. Calibration is kept in RAM only during runtime.
         } else {
             Serial.printf("[MAG] Insufficient range for calibration update (X:%.1f Y:%.1f - need >%.1f)\n", 
                          rangeX, rangeY, minRange);
@@ -410,11 +409,16 @@ void Compass::Begin()
   Serial.printf("   Range: %.1f to %.1f uT\n", sensor.min_value, sensor.max_value);
   Serial.printf("   Resolution: %.3f uT\n", sensor.resolution);
 
+  // Initialize EEPROM here (in setup context) so the flash read that
+  // EEPROM.begin() triggers happens before I2C interrupts are active.
+  // Calling it inside the compass_task disables the flash cache mid-interrupt.
+  EEPROM.begin(512);
+
   Serial.println("🧭 Starting Compass task...");
   xTaskCreate(
       compass_task,  // Task function
       "compasstask", // Task name
-      4096,        // Stack size (increased from 2000 to prevent overflow)
+      8192,        // Stack size: Serial.printf needs ~256B + Kalman + calibration logic
       NULL,        // Task input parameter
       1,           // Task priority (lowered from 2 to reduce conflicts)
       NULL         // Task handle
