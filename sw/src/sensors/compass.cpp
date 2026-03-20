@@ -346,17 +346,17 @@ static void compass_task(void *pvParameters)
     static int filteredDebugCounter = 0;
     filteredDebugCounter++;
     if (filteredDebugCounter >= 100) {
-      float magnitude3D = sqrt(filteredMagX * filteredMagX + filteredMagY * filteredMagY + filteredMagZ * filteredMagZ);
-      float magnitude2D = sqrt(filteredMagX * filteredMagX + filteredMagY * filteredMagY);
-      Serial.printf("[MAG] Filtered: X=%.2f, Y=%.2f, Z=%.2f uT  |3D|=%.1f |XY|=%.1f\n",
-                    filteredMagX, filteredMagY, filteredMagZ, magnitude3D, magnitude2D);
-      if (magnitude2D > 1.0f) {
+      Serial.printf("[MAG] Filtered: X=%.2f, Y=%.2f, Z=%.2f uT\n", 
+                    filteredMagX, filteredMagY, filteredMagZ);
+      
+      // Calculate and validate compass heading
+      float magnitude = sqrt(filteredMagX * filteredMagX + filteredMagY * filteredMagY);
+      if (magnitude > 1.0f) { // Only calculate if we have sufficient magnetic field
         float heading = atan2(filteredMagY, filteredMagX) * 180.0 / PI;
         if (heading < 0) heading += 360.0;
-        Serial.printf("[MAG] Heading: %.1f°\n", heading);
+        Serial.printf("[MAG] Heading: %.1f° (magnitude: %.1f uT)\n", heading, magnitude);
       } else {
-        Serial.printf("[MAG] Warning: Low XY field (%.2f uT) - motor interference likely. 3D=%.1f uT\n",
-                      magnitude2D, magnitude3D);
+        Serial.println("[MAG] Warning: Insufficient magnetic field for compass");
       }
       filteredDebugCounter = 0;
     }
@@ -365,10 +365,9 @@ static void compass_task(void *pvParameters)
     globalVar_set(rawMagY, filteredMagY);
     globalVar_set(rawMagZ, filteredMagZ);
     
-    // Calculate and store compass heading (use 3D magnitude to detect real sensor failure)
-    float magnitude3D = sqrt(filteredMagX * filteredMagX + filteredMagY * filteredMagY + filteredMagZ * filteredMagZ);
+    // Calculate and store compass heading
     float magnitude = sqrt(filteredMagX * filteredMagX + filteredMagY * filteredMagY);
-    if (magnitude3D > 1.0f) { // Sensor alive if any axis has field
+    if (magnitude > 1.0f) { // Only calculate if we have sufficient magnetic field
       float heading = atan2(filteredMagY, filteredMagX) * 180.0 / PI;
       if (heading < 0) heading += 360.0;
       
