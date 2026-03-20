@@ -16,7 +16,7 @@ typedef struct
 static TaskSafeWireState task_safe_wire_state = {0};
 static portMUX_TYPE task_safe_wire_setup_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void IRAM_ATTR task_safe_wire_ensure_mutex()
+static void task_safe_wire_ensure_mutex()
 {
     if (task_safe_wire_state.mutex != NULL)
     {
@@ -31,13 +31,13 @@ static void IRAM_ATTR task_safe_wire_ensure_mutex()
     portEXIT_CRITICAL(&task_safe_wire_setup_mux);
 }
 
-void IRAM_ATTR task_safe_wire_lock()
+void task_safe_wire_lock()
 {
     task_safe_wire_ensure_mutex();
     xSemaphoreTakeRecursive(task_safe_wire_state.mutex, portMAX_DELAY);
 }
 
-bool IRAM_ATTR task_safe_wire_try_lock(uint32_t timeoutMs)
+bool task_safe_wire_try_lock(uint32_t timeoutMs)
 {
     task_safe_wire_ensure_mutex();
     if (task_safe_wire_state.mutex == NULL)
@@ -47,12 +47,12 @@ bool IRAM_ATTR task_safe_wire_try_lock(uint32_t timeoutMs)
     return xSemaphoreTakeRecursive(task_safe_wire_state.mutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
-void IRAM_ATTR task_safe_wire_unlock()
+void task_safe_wire_unlock()
 {
     xSemaphoreGiveRecursive(task_safe_wire_state.mutex);
 }
 
-void IRAM_ATTR task_safe_wire_begin(uint8_t address)
+void task_safe_wire_begin(uint8_t address)
 {
     task_safe_wire_lock();
     if (!task_safe_wire_state.initialized)
@@ -71,14 +71,14 @@ void IRAM_ATTR task_safe_wire_begin(uint8_t address)
     Wire.beginTransmission(address);
 }
 
-size_t IRAM_ATTR task_safe_wire_write(uint8_t value)
+size_t task_safe_wire_write(uint8_t value)
 {
     if (!task_safe_wire_state.session_active)
         return 0;
     return Wire.write(value);
 }
 
-void IRAM_ATTR task_safe_wire_restart()
+void task_safe_wire_restart()
 {
     if (!task_safe_wire_state.session_active || !task_safe_wire_state.write_started)
         return;
@@ -86,28 +86,28 @@ void IRAM_ATTR task_safe_wire_restart()
     task_safe_wire_state.write_started = false;
 }
 
-uint8_t IRAM_ATTR task_safe_wire_request_from(uint8_t address, uint8_t quantity)
+uint8_t task_safe_wire_request_from(uint8_t address, uint8_t quantity)
 {
     if (!task_safe_wire_state.session_active)
         return 0;
     return Wire.requestFrom(address, quantity);
 }
 
-int IRAM_ATTR task_safe_wire_read()
+int task_safe_wire_read()
 {
     if (!task_safe_wire_state.session_active)
         return -1;
     return Wire.read();
 }
 
-int IRAM_ATTR task_safe_wire_available()
+int task_safe_wire_available()
 {
     if (!task_safe_wire_state.session_active)
         return 0;
     return Wire.available();
 }
 
-uint8_t IRAM_ATTR task_safe_wire_end()
+uint8_t task_safe_wire_end()
 {
     uint8_t result = 0;
     
