@@ -145,6 +145,7 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     "\"yaw_rate\":%.2f,"
     "\"gy_x\":%.2f,"
     "\"gy_y\":%.2f,"
+    "\"gy_z\":%.2f,"
     "\"heading\":%.1f,"
     "\"compass\":%.1f,"
     "\"mag_x\":%.2f,"
@@ -162,7 +163,7 @@ static void publishSensorData(const FilteredSensors& filt, uint32_t nowMs) {
     chipid.c_str(), (unsigned)g_seq++, (unsigned long)nowMs,
     filt.ul, filt.ur, filt.uf, filt.ub,
     filt.gyZ,
-    filt.gyX, filt.gyY,
+    filt.gyX, filt.gyY, filt.gyZ,
     filt.heading, filt.heading,
     filt.magX, filt.magY, filt.magZ,
     filt.accX, filt.accY, filt.accZ,
