@@ -16,7 +16,7 @@ typedef struct
 static TaskSafeWireState task_safe_wire_state = {0};
 static portMUX_TYPE task_safe_wire_setup_mux = portMUX_INITIALIZER_UNLOCKED;
 
-static void task_safe_wire_ensure_mutex()
+static IRAM_ATTR void task_safe_wire_ensure_mutex()
 {
     if (task_safe_wire_state.mutex != NULL)
     {
@@ -31,13 +31,13 @@ static void task_safe_wire_ensure_mutex()
     portEXIT_CRITICAL(&task_safe_wire_setup_mux);
 }
 
-void task_safe_wire_lock()
+void IRAM_ATTR task_safe_wire_lock()
 {
     task_safe_wire_ensure_mutex();
     xSemaphoreTakeRecursive(task_safe_wire_state.mutex, portMAX_DELAY);
 }
 
-bool task_safe_wire_try_lock(uint32_t timeoutMs)
+bool IRAM_ATTR task_safe_wire_try_lock(uint32_t timeoutMs)
 {
     task_safe_wire_ensure_mutex();
     if (task_safe_wire_state.mutex == NULL)
@@ -47,7 +47,7 @@ bool task_safe_wire_try_lock(uint32_t timeoutMs)
     return xSemaphoreTakeRecursive(task_safe_wire_state.mutex, pdMS_TO_TICKS(timeoutMs)) == pdTRUE;
 }
 
-void task_safe_wire_unlock()
+void IRAM_ATTR task_safe_wire_unlock()
 {
     xSemaphoreGiveRecursive(task_safe_wire_state.mutex);
 }

@@ -361,9 +361,9 @@ static void compass_task(void *pvParameters)
       filteredDebugCounter = 0;
     }
 
-    globalVar_set(rawMagX, filteredMagX);
-    globalVar_set(rawMagY, filteredMagY);
-    globalVar_set(rawMagZ, filteredMagZ);
+    globalVar_set(rawMagX, (long)(filteredMagX * 100));
+    globalVar_set(rawMagY, (long)(filteredMagY * 100));
+    globalVar_set(rawMagZ, (long)(filteredMagZ * 100));
     
     // Calculate and store compass heading
     float magnitude = sqrt(filteredMagX * filteredMagX + filteredMagY * filteredMagY);

@@ -92,9 +92,9 @@ static float readGyroZ()  { return (float)globalVar_get(rawGyZ, &age); }
 static float readAccX()   { return globalVar_get(rawAccX, &age) / 16384.0f; }
 static float readAccY()   { return globalVar_get(rawAccY, &age) / 16384.0f; }
 static float readAccZ()   { return globalVar_get(rawAccZ, &age) / 16384.0f; }
-static float readMagX()   { return (float)globalVar_get(rawMagX, &age); }
-static float readMagY()   { return (float)globalVar_get(rawMagY, &age); }
-static float readMagZ()   { return (float)globalVar_get(rawMagZ, &age); }
+static float readMagX()   { return globalVar_get(rawMagX, &age) / 100.0f; }
+static float readMagY()   { return globalVar_get(rawMagY, &age) / 100.0f; }
+static float readMagZ()   { return globalVar_get(rawMagZ, &age) / 100.0f; }
 static float readHeading() {
   long h = globalVar_get(calcHeading, &age);
   return (h == -1) ? NAN : h / 10.0f;  // stored as 1/10 degrees

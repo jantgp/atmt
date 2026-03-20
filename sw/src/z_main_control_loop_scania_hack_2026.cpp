@@ -266,17 +266,17 @@ float readHeadingDeg()         {
 
 float readMagneticX() {
   long val = globalVar_get(rawMagX, &age);
-  return (float)val;
+  return (float)val / 100.0f;
 }
 
 float readMagneticY() {
   long val = globalVar_get(rawMagY, &age);
-  return (float)val;
+  return (float)val / 100.0f;
 }
 
 float readMagneticZ() {
   long val = globalVar_get(rawMagZ, &age);
-  return (float)val;
+  return (float)val / 100.0f;
 }
 
 float readAccelerationX() {
