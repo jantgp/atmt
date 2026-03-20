@@ -69,12 +69,27 @@ static const float US_ALPHA  = 0.35f;
 static const float IMU_ALPHA = 0.25f;
 
 // -----------------------------
-// EMA helper
+// EMA helpers
 // -----------------------------
 static float ema(float prev, float current, float alpha) {
   if (isnan(prev))    return current;
   if (isnan(current)) return prev;
   return alpha * current + (1.0f - alpha) * prev;
+}
+
+// Circular EMA for angles: always interpolates via the shortest arc.
+// Without this, crossing 0°/360° makes the filter traverse the long way
+// around (e.g. 350°→2° would pass through ~270° instead of staying near 0°).
+static float ema_angle(float prev, float current, float alpha) {
+  if (isnan(prev))    return current;
+  if (isnan(current)) return prev;
+  float diff = current - prev;
+  if (diff >  180.0f) diff -= 360.0f;
+  if (diff < -180.0f) diff += 360.0f;
+  float result = prev + alpha * diff;
+  if (result <    0.0f) result += 360.0f;
+  if (result >= 360.0f) result -= 360.0f;
+  return result;
 }
 
 // -----------------------------
@@ -118,7 +133,7 @@ static void filterSensors(const RawSensors& raw, FilteredSensors& filt) {
   filt.magX    = ema(filt.magX,    raw.magX,    IMU_ALPHA);
   filt.magY    = ema(filt.magY,    raw.magY,    IMU_ALPHA);
   filt.magZ    = ema(filt.magZ,    raw.magZ,    IMU_ALPHA);
-  filt.heading = ema(filt.heading, raw.heading, IMU_ALPHA);
+  filt.heading = ema_angle(filt.heading, raw.heading, IMU_ALPHA);
 }
 
 // -----------------------------
@@ -319,11 +334,11 @@ void loop()
     publishSensorData(g_filt, nowMs);
   }
 
-  // Safety stop if front or back is too close
-  if (!isnan(g_filt.uf) && g_filt.uf < 20.0f) {
+  // Safety stop if front or back is too close, but still allow reversing away.
+  if (!isnan(g_filt.uf) && g_filt.uf < 20.0f && g_cmdPwm > 0) {
     motor.driving(0);
   }
-  if (!isnan(g_filt.ub) && g_filt.ub < 20.0f) {
+  if (!isnan(g_filt.ub) && g_filt.ub < 20.0f && g_cmdPwm < 0) {
     motor.driving(0);
   }
 }
